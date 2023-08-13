@@ -41,6 +41,13 @@
 #define CFG_VHT_TX_MCS_MAP_STAMAX    0xFFFF
 #define CFG_VHT_TX_MCS_MAP_STADEF    0xFFFE
 
+#define STA_DOT11_MODE_INDX       0
+#define P2P_DEV_DOT11_MODE_INDX   4
+#define NAN_DISC_DOT11_MODE_INDX  8
+#define OCB_DOT11_MODE_INDX       12
+#define TDLS_DOT11_MODE_INDX      16
+#define NDI_DOT11_MODE_INDX       20
+
 /* Roam debugging related macro defines */
 #define MAX_ROAM_DEBUG_BUF_SIZE    250
 #define MAX_ROAM_EVENTS_SUPPORTED  5
@@ -194,12 +201,28 @@ enum mlme_dot11_mode {
 };
 
 /**
+ * enum mlme_vdev_dot11_mode - Dot11 mode of the vdev
+ * MLME_VDEV_DOT11_MODE_AUTO: vdev uses mlme_dot11_mode
+ * MLME_VDEV_DOT11_MODE_11N: vdev supports 11N mode
+ * MLME_VDEV_DOT11_MODE_11AC: vdev supports 11AC mode
+ * MLME_VDEV_DOT11_MODE_11AX: vdev supports 11AX mode
+ */
+enum mlme_vdev_dot11_mode {
+	MLME_VDEV_DOT11_MODE_AUTO,
+	MLME_VDEV_DOT11_MODE_11N,
+	MLME_VDEV_DOT11_MODE_11AC,
+	MLME_VDEV_DOT11_MODE_11AX,
+};
+
+/**
  * struct wlan_mlme_dot11_mode - dot11 mode
  *
  * @dot11_mode: dot11 mode supported
+ * @vdev_type_dot11_mode: dot11 mode supported by different vdev types
  */
 struct wlan_mlme_dot11_mode {
 	enum mlme_dot11_mode dot11_mode;
+	uint32_t vdev_type_dot11_mode;
 };
 
 /**
@@ -1349,7 +1372,6 @@ enum station_keepalive_method {
  * @dot11p_mode:                    Set 802.11p mode
  * @fils_max_chan_guard_time:       Set maximum channel guard time
  * @current_rssi:                   Current rssi
- * @deauth_retry_cnt:               Deauth retry count
  * @ignore_peer_erp_info:           Ignore peer infrormation
  * @sta_prefer_80mhz_over_160mhz:   Set Sta preference to connect in 80HZ/160HZ
  * @enable_5g_ebt:                  Set default 5G early beacon termination
@@ -1369,7 +1391,6 @@ struct wlan_mlme_sta_cfg {
 	enum dot11p_mode dot11p_mode;
 	uint8_t fils_max_chan_guard_time;
 	uint8_t current_rssi;
-	uint8_t deauth_retry_cnt;
 	bool ignore_peer_erp_info;
 	bool sta_prefer_80mhz_over_160mhz;
 	bool enable_5g_ebt;
@@ -2191,10 +2212,22 @@ struct wlan_mlme_mwc {
 #endif
 
 /**
+ * enum mlme_reg_srd_master_modes  - Bitmap of SRD master modes supported
+ * @MLME_SRD_MASTER_MODE_SAP: SRD master mode for SAP
+ * @MLME_SRD_MASTER_MODE_P2P_GO: SRD master mode for P2P-GO
+ * @MLME_SRD_MASTER_MODE_NAN: SRD master mode for NAN
+ */
+enum mlme_reg_srd_master_modes {
+	MLME_SRD_MASTER_MODE_SAP = 1,
+	MLME_SRD_MASTER_MODE_P2P_GO = 2,
+	MLME_SRD_MASTER_MODE_NAN = 4,
+};
+
+/**
  * struct wlan_mlme_reg - REG related configs
  * @self_gen_frm_pwr: self-generated frame power in tx chain mask
  * for CCK rates
- * @etsi13_srd_chan_in_master_mode: etsi13 srd chan in master mode
+ * @etsi_srd_chan_in_master_mode: etsi srd chan in master mode
  * @restart_beaconing_on_ch_avoid: restart beaconing on ch avoid
  * @indoor_channel_support: indoor channel support
  * @scan_11d_interval: scan 11d interval
@@ -2210,10 +2243,11 @@ struct wlan_mlme_mwc {
  * @enable_pending_chan_list_req: enables/disables scan channel
  * list command to FW till the current scan is complete.
  * @retain_nol_across_regdmn_update: Retain the NOL list across the regdomain.
+ * @enable_nan_on_indoor_channels: Enable nan on Indoor channels
  */
 struct wlan_mlme_reg {
 	uint32_t self_gen_frm_pwr;
-	bool etsi13_srd_chan_in_master_mode;
+	uint8_t etsi_srd_chan_in_master_mode;
 	enum restart_beaconing_on_ch_avoid_rule
 		restart_beaconing_on_ch_avoid;
 	bool indoor_channel_support;
@@ -2230,6 +2264,7 @@ struct wlan_mlme_reg {
 	bool ignore_fw_reg_offload_ind;
 	bool enable_pending_chan_list_req;
 	bool retain_nol_across_regdmn_update;
+	bool enable_nan_on_indoor_channels;
 };
 
 /**

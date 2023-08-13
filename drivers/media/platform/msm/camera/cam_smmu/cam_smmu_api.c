@@ -24,7 +24,6 @@
 #include <soc/qcom/scm.h>
 #include <soc/qcom/secure_buffer.h>
 #include <uapi/media/cam_req_mgr.h>
-#include <linux/debugfs.h>
 #include "cam_smmu_api.h"
 #include "cam_debug_util.h"
 
@@ -61,6 +60,17 @@ struct cam_smmu_work_payload {
 	void *token;
 	struct list_head list;
 };
+
+struct cam_smmu_saved_info {
+	int ion_fd;
+	unsigned long FAR_addr;
+	size_t mapping_len;
+	size_t closest_mapping_len;
+	unsigned long closest_mapping_paddr;
+	unsigned long closest_mapping_end_addr;
+	struct dma_buf closest_mapping_buf;
+	uint32_t buf_handle;
+}saved_info;
 
 enum cam_protection_type {
 	CAM_PROT_INVALID,
@@ -187,10 +197,6 @@ static const char *qdss_region_name = "qdss";
 
 static struct cam_iommu_cb_set iommu_cb_set;
 
-static struct dentry *smmu_dentry;
-
-static bool smmu_fatal_flag = true;
-
 static enum dma_data_direction cam_smmu_translate_dir(
 	enum cam_smmu_map_dir dir);
 
@@ -301,30 +307,6 @@ static void cam_smmu_page_fault_work(struct work_struct *work)
 	kfree(payload);
 }
 
-static int cam_smmu_create_debugfs_entry(void)
-{
-	int rc = 0;
-
-	smmu_dentry = debugfs_create_dir("camera_smmu", NULL);
-	if (!smmu_dentry)
-		return -ENOMEM;
-
-	if (!debugfs_create_bool("cam_smmu_fatal",
-		0644,
-		smmu_dentry,
-		&smmu_fatal_flag)) {
-		CAM_ERR(CAM_SMMU, "failed to create cam_smmu_fatal entry");
-		rc = -ENOMEM;
-		goto err;
-	}
-
-	return rc;
-err:
-	debugfs_remove_recursive(smmu_dentry);
-	smmu_dentry = NULL;
-	return rc;
-}
-
 static void cam_smmu_print_user_list(int idx)
 {
 	struct cam_dma_buff_info *mapping;
@@ -417,6 +399,15 @@ end:
 			(unsigned long)closest_mapping->paddr + mapping->len,
 			closest_mapping->buf,
 			buf_handle);
+		saved_info.ion_fd = closest_mapping->ion_fd;
+		saved_info.FAR_addr = current_addr;
+		saved_info.mapping_len = mapping->len;
+		saved_info.closest_mapping_len = closest_mapping->len;
+		saved_info.closest_mapping_paddr = (unsigned long)closest_mapping->paddr;
+		saved_info.closest_mapping_end_addr = saved_info.closest_mapping_paddr +
+				(unsigned long)saved_info.mapping_len;
+		memcpy(&saved_info.closest_mapping_buf, closest_mapping->buf, sizeof(struct dma_buf));
+		saved_info.buf_handle = buf_handle;
 	} else
 		CAM_INFO(CAM_SMMU,
 			"Cannot find vaddr:%lx in SMMU %s virt address",
@@ -711,6 +702,11 @@ static int cam_smmu_create_add_handle_in_table(char *name,
 		if (!strcmp(iommu_cb_set.cb_info[i].name, name)) {
 			mutex_lock(&iommu_cb_set.cb_info[i].lock);
 			if (iommu_cb_set.cb_info[i].handle != HANDLE_INIT) {
+				CAM_ERR(CAM_SMMU,
+					"Error: %s already got handle 0x%x",
+					name,
+					iommu_cb_set.cb_info[i].handle);
+
 				if (iommu_cb_set.cb_info[i].is_secure)
 					iommu_cb_set.cb_info[i].secure_count++;
 
@@ -719,11 +715,6 @@ static int cam_smmu_create_add_handle_in_table(char *name,
 					*hdl = iommu_cb_set.cb_info[i].handle;
 					return 0;
 				}
-
-				CAM_ERR(CAM_SMMU,
-					"Error: %s already got handle 0x%x",
-					name, iommu_cb_set.cb_info[i].handle);
-
 				return -EINVAL;
 			}
 
@@ -1403,42 +1394,6 @@ end:
 	return rc;
 }
 EXPORT_SYMBOL(cam_smmu_dealloc_qdss);
-
-int cam_smmu_get_io_region_info(int32_t smmu_hdl,
-	dma_addr_t *iova, size_t *len)
-{
-	int32_t idx;
-
-	if (!iova || !len || (smmu_hdl == HANDLE_INIT)) {
-		CAM_ERR(CAM_SMMU, "Error: Input args are invalid");
-		return -EINVAL;
-	}
-
-	idx = GET_SMMU_TABLE_IDX(smmu_hdl);
-	if (idx < 0 || idx >= iommu_cb_set.cb_num) {
-		CAM_ERR(CAM_SMMU,
-			"Error: handle or index invalid. idx = %d hdl = %x",
-			idx, smmu_hdl);
-		return -EINVAL;
-	}
-
-	if (!iommu_cb_set.cb_info[idx].io_support) {
-		CAM_ERR(CAM_SMMU,
-			"I/O memory not supported for this SMMU handle");
-		return -EINVAL;
-	}
-
-	mutex_lock(&iommu_cb_set.cb_info[idx].lock);
-	*iova = iommu_cb_set.cb_info[idx].io_info.iova_start;
-	*len = iommu_cb_set.cb_info[idx].io_info.iova_len;
-
-	CAM_DBG(CAM_SMMU,
-		"I/O area for hdl = %x start addr = %pK len = %zu",
-		smmu_hdl, *iova, *len);
-	mutex_unlock(&iommu_cb_set.cb_info[idx].lock);
-
-	return 0;
-}
 
 int cam_smmu_get_region_info(int32_t smmu_hdl,
 	enum cam_smmu_region_id region_id,
@@ -2472,7 +2427,7 @@ static int cam_smmu_map_stage2_buffer_and_add_to_list(int idx, int ion_fd,
 	mapping_info->ref_count = 1;
 	mapping_info->buf = dmabuf;
 
-	CAM_DBG(CAM_SMMU, "idx=%d, ion_fd=%d, dev=%pK, paddr=%pK, len=%u",
+	CAM_INFO(CAM_SMMU, "idx=%d, ion_fd=%d, dev=%pK, paddr=%pK, len=%u",
 			idx, ion_fd,
 			(void *)iommu_cb_set.cb_info[idx].dev,
 			(void *)*paddr_ptr, (unsigned int)*len_ptr);
@@ -3197,6 +3152,7 @@ static int cam_smmu_setup_cb(struct cam_context_bank_info *cb,
 	struct device *dev)
 {
 	int rc = 0;
+	int32_t stall_disable = 1;
 
 	if (!cb || !dev) {
 		CAM_ERR(CAM_SMMU, "Error: invalid input params");
@@ -3256,10 +3212,16 @@ static int cam_smmu_setup_cb(struct cam_context_bank_info *cb,
 			goto end;
 		}
 
-		iommu_cb_set.non_fatal_fault = smmu_fatal_flag;
+		iommu_cb_set.non_fatal_fault = 1;
 		if (iommu_domain_set_attr(cb->mapping->domain,
 			DOMAIN_ATTR_NON_FATAL_FAULTS,
 			&iommu_cb_set.non_fatal_fault) < 0) {
+			CAM_ERR(CAM_SMMU,
+				"Error: failed to set non fatal fault attribute");
+		}
+		if (iommu_domain_set_attr(cb->mapping->domain,
+			DOMAIN_ATTR_CB_STALL_DISABLE,
+			&stall_disable) < 0) {
 			CAM_ERR(CAM_SMMU,
 				"Error: failed to set non fatal fault attribute");
 		}
@@ -3607,7 +3569,6 @@ static struct platform_driver cam_smmu_driver = {
 
 static int __init cam_smmu_init_module(void)
 {
-	cam_smmu_create_debugfs_entry();
 	return platform_driver_register(&cam_smmu_driver);
 }
 

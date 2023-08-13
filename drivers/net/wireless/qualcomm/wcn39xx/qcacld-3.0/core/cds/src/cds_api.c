@@ -116,12 +116,6 @@ static struct ol_if_ops  dp_ol_if_ops = {
 	.is_roam_inprogress = wma_is_roam_in_progress,
 	.get_con_mode = cds_get_conparam,
 	.send_delba = cds_send_delba,
-#ifdef DP_MEM_PRE_ALLOC
-	.dp_prealloc_get_consistent = dp_prealloc_get_coherent,
-	.dp_prealloc_put_consistent = dp_prealloc_put_coherent,
-	.dp_get_multi_pages = dp_prealloc_get_multi_pages,
-	.dp_put_multi_pages = dp_prealloc_put_multi_pages
-#endif
     /* TODO: Add any other control path calls required to OL_IF/WMA layer */
 };
 #else
@@ -570,10 +564,9 @@ static int cds_hang_event_notifier_call(struct notifier_block *block,
 	if (!cds_hang_evt_buff)
 		return NOTIFY_STOP_MASK;
 
-	if (cds_hang_data->offset >= QDF_WLAN_MAX_HOST_OFFSET)
-		return NOTIFY_STOP_MASK;
-
 	total_len = sizeof(*cmd);
+	if (cds_hang_data->offset + total_len > QDF_WLAN_HANG_FW_OFFSET)
+		return NOTIFY_STOP_MASK;
 
 	cds_hang_evt_buff = cds_hang_data->hang_data + cds_hang_data->offset;
 	cmd = (struct cds_hang_event_fixed_param *)cds_hang_evt_buff;
