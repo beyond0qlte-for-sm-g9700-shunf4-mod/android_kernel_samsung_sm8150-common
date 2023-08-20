@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -2048,6 +2048,7 @@ static struct platform_driver dsi_ctrl_driver = {
 		.suppress_bind_attrs = true,
 	},
 };
+
 
 void dsi_ctrl_debug_dump(u32 *entries, u32 size)
 {

@@ -25,6 +25,7 @@
 #include <linux/soc/qcom/fsa4480-i2c.h>
 #endif
 
+#include <drm/drm_client.h>
 #include "sde_connector.h"
 
 #include "msm_drv.h"
@@ -184,6 +185,8 @@ static const struct of_device_id dp_dt_match[] = {
 	{.compatible = "qcom,dp-display"},
 	{}
 };
+
+static void dp_display_update_hdcp_info(struct dp_display_private *dp);
 
 #ifdef CONFIG_SEC_DISPLAYPORT
 struct dp_display_private *g_secdp_priv;
@@ -766,6 +769,12 @@ static inline bool dp_display_is_hdcp_enabled(struct dp_display_private *dp)
 	return dp->link->hdcp_status.hdcp_version && dp->hdcp.ops;
 }
 
+static bool is_drm_bootsplash_enabled(struct device *dev)
+{
+	return of_property_read_bool(dev->of_node,
+		"qcom,sde-drm-fb-splash-logo-enabled");
+}
+
 static irqreturn_t dp_display_irq(int irq, void *dev_id)
 {
 	struct dp_display_private *dp = dev_id;
@@ -1328,6 +1337,7 @@ static int dp_display_send_hpd_notification(struct dp_display_private *dp)
 {
 	int ret = 0;
 	bool hpd = dp->is_connected;
+	static int bootsplash_count;
 
 #ifdef CONFIG_SEC_DISPLAYPORT
 	if (hpd && !secdp_get_cable_status()) {
@@ -1343,6 +1353,14 @@ static int dp_display_send_hpd_notification(struct dp_display_private *dp)
 		dp->dp_display.is_sst_connected = hpd;
 	else
 		dp->dp_display.is_sst_connected = false;
+
+	if (!dp->dp_display.is_bootsplash_en
+		&& is_drm_bootsplash_enabled(dp->dp_display.drm_dev->dev)
+		&& !bootsplash_count) {
+		dp->dp_display.is_bootsplash_en = true;
+		bootsplash_count++;
+		drm_client_dev_register(dp->dp_display.drm_dev);
+	}
 
 	reinit_completion(&dp->notification_comp);
 	dp_display_send_hpd_event(dp);
@@ -3259,6 +3277,7 @@ error_sysfs:
 	secdp_sysfs_put(dp->sysfs);
 #endif
 error_link:
+	dp->aux->drm_aux_deregister(dp->aux);
 	dp_aux_put(dp->aux);
 error_aux:
 	dp_power_put(dp->power);
@@ -3511,6 +3530,11 @@ static int dp_display_post_enable(struct dp_display *dp_display, void *panel)
 	dp_panel = panel;
 
 	mutex_lock(&dp->session_lock);
+
+	if (dp->dp_display.is_bootsplash_en) {
+		dp->dp_display.is_bootsplash_en = false;
+		goto end;
+	}
 
 	if (!dp->power_on) {
 		pr_debug("stream not setup, return\n");

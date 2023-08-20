@@ -199,6 +199,7 @@ void mmc_host_clk_hold(struct mmc_host *host)
 	spin_unlock_irqrestore(&host->clk_lock, flags);
 	mutex_unlock(&host->clk_gate_mutex);
 }
+EXPORT_SYMBOL(mmc_host_clk_hold);
 
 /**
  *	mmc_host_may_gate_card - check if this card may be gated
@@ -248,6 +249,7 @@ void mmc_host_clk_release(struct mmc_host *host)
 				      msecs_to_jiffies(host->clkgate_delay));
 	spin_unlock_irqrestore(&host->clk_lock, flags);
 }
+EXPORT_SYMBOL(mmc_host_clk_release);
 
 /**
  *	mmc_host_clk_rate - get current clock frequency setting
@@ -965,6 +967,16 @@ static struct attribute_group dev_attr_grp = {
 	.attrs = dev_attrs,
 };
 
+static int mmc_validate_host_caps(struct mmc_host *host)
+{
+	if (host->caps & MMC_CAP_SDIO_IRQ && !host->ops->enable_sdio_irq) {
+		dev_warn(host->parent, "missing ->enable_sdio_irq() ops\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 /**
  *	mmc_add_host - initialise host hardware
  *	@host: mmc host
@@ -977,8 +989,9 @@ int mmc_add_host(struct mmc_host *host)
 {
 	int err;
 
-	WARN_ON((host->caps & MMC_CAP_SDIO_IRQ) &&
-		!host->ops->enable_sdio_irq);
+	err = mmc_validate_host_caps(host);
+	if (err)
+		return err;
 
 	err = device_add(&host->class_dev);
 	if (err)

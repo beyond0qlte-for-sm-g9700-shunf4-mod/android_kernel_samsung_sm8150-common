@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -360,6 +360,7 @@ struct dwc3_msm {
 	struct device_node *dwc3_node;
 	struct property *num_gsi_eps;
 	bool			dual_port;
+	bool			usb_data_enabled;
 };
 
 #define USB_HSPHY_3P3_VOL_MIN		3050000 /* uV */
@@ -3631,6 +3632,9 @@ static int dwc3_msm_id_notifier(struct notifier_block *nb,
 	if (!edev || !mdwc)
 		return NOTIFY_DONE;
 
+	if (!mdwc->usb_data_enabled)
+		return NOTIFY_DONE;
+
 	dwc = platform_get_drvdata(mdwc->dwc3);
 
 	dbg_event(0xFF, "extcon idx", enb->idx);
@@ -3758,6 +3762,14 @@ static int dwc3_msm_vbus_notifier(struct notifier_block *nb,
 
 	if (!edev || !mdwc)
 		return NOTIFY_DONE;
+
+	if (!mdwc->usb_data_enabled) {
+		if (event)
+			dwc3_msm_gadget_vbus_draw(mdwc, 500);
+		else
+			dwc3_msm_gadget_vbus_draw(mdwc, 0);
+		return NOTIFY_DONE;
+	}
 
 	dwc = platform_get_drvdata(mdwc->dwc3);
 
@@ -4083,6 +4095,34 @@ static ssize_t bus_vote_store(struct device *dev,
 	return count;
 }
 static DEVICE_ATTR_RW(bus_vote);
+
+static ssize_t usb_data_enabled_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
+{
+	struct dwc3_msm *mdwc = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%s\n",
+			  mdwc->usb_data_enabled ? "enabled" : "disabled");
+}
+
+static ssize_t usb_data_enabled_store(struct device *dev,
+				      struct device_attribute *attr,
+				      const char *buf, size_t count)
+{
+	struct dwc3_msm *mdwc = dev_get_drvdata(dev);
+
+	if (kstrtobool(buf, &mdwc->usb_data_enabled))
+		return -EINVAL;
+
+	if (!mdwc->usb_data_enabled) {
+		mdwc->vbus_active = false;
+		mdwc->id_state = DWC3_ID_FLOAT;
+		dwc3_ext_event_notify(mdwc);
+	}
+
+	return count;
+}
+static DEVICE_ATTR_RW(usb_data_enabled);
 
 static int dwc_dpdm_cb(struct notifier_block *nb, unsigned long evt, void *p)
 {
@@ -4503,6 +4543,9 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 
 	mutex_init(&mdwc->suspend_resume_mutex);
 
+	/* set the initial value */
+	mdwc->usb_data_enabled = true;
+
 	if (of_property_read_bool(node, "extcon")) {
 		ret = dwc3_msm_extcon_register(mdwc);
 		if (ret)
@@ -4572,6 +4615,7 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 	device_create_file(&pdev->dev, &dev_attr_speed);
 	device_create_file(&pdev->dev, &dev_attr_usb_compliance_mode);
 	device_create_file(&pdev->dev, &dev_attr_bus_vote);
+	device_create_file(&pdev->dev, &dev_attr_usb_data_enabled);
 
 	mdwc->dwc3_msm_probe_done = 1;
 	mdwc->dwc3_msm_current_speed_mode = USB_SPEED_UNKNOWN;
@@ -4611,6 +4655,7 @@ static int dwc3_msm_remove(struct platform_device *pdev)
 	int ret_pm;
 
 	device_remove_file(&pdev->dev, &dev_attr_mode);
+	device_remove_file(&pdev->dev, &dev_attr_usb_data_enabled);
 
 	if (mdwc->dpdm_nb.notifier_call) {
 		regulator_unregister_notifier(mdwc->dpdm_reg, &mdwc->dpdm_nb);
@@ -5368,7 +5413,8 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 			mdwc->drd_state = DRD_STATE_PERIPHERAL;
 			work = 1;
 		} else {
-			dwc3_msm_gadget_vbus_draw(mdwc, 0);
+			if (mdwc->usb_data_enabled)
+				dwc3_msm_gadget_vbus_draw(mdwc, 0);
 			dev_info(mdwc->dev, "Cable disconnected\n");
 		}
 		break;
@@ -5496,8 +5542,6 @@ static int dwc3_msm_pm_suspend(struct device *dev)
 	dev_info(dev, "dwc3-msm PM suspend\n");
 	dbg_event(0xFF, "PM Sus", 0);
 
-	flush_workqueue(mdwc->dwc3_wq);
-
 	/*
 	 * Check if pm_suspend can proceed irrespective of runtimePM state of
 	 * host.
@@ -5529,8 +5573,6 @@ static int dwc3_msm_pm_resume(struct device *dev)
 	dev_dbg(dev, "dwc3-msm PM resume\n");
 	dbg_event(0xFF, "PM Res", 0);
 
-	/* flush to avoid race in read/write of pm_suspended */
-	flush_workqueue(mdwc->dwc3_wq);
 	atomic_set(&mdwc->pm_suspended, 0);
 
 	if (atomic_read(&dwc->in_lpm) &&
@@ -5566,8 +5608,6 @@ static int dwc3_msm_pm_freeze(struct device *dev)
 
 	dev_dbg(dev, "dwc3-msm PM freeze\n");
 	dbg_event(0xFF, "PM Freeze", 0);
-
-	flush_workqueue(mdwc->dwc3_wq);
 
 	/*
 	 * Check if pm_freeze can proceed irrespective of runtimePM state of
@@ -5614,8 +5654,6 @@ static int dwc3_msm_pm_restore(struct device *dev)
 	dev_info(dev, "dwc3-msm PM restore\n");
 	dbg_event(0xFF, "PM Restore", 0);
 
-	/* flush to avoid race in read/write of pm_suspended */
-	flush_workqueue(mdwc->dwc3_wq);
 	atomic_set(&mdwc->pm_suspended, 0);
 
 	if (!dwc->ignore_wakeup_src_in_hostmode || !mdwc->in_host_mode) {

@@ -805,6 +805,9 @@ static int dsi_panel_update_backlight(struct dsi_panel *panel,
 
 	dsi = &panel->mipi_device;
 
+	if (panel->bl_config.bl_inverted_dbv)
+		bl_lvl = (((bl_lvl & 0xff) << 8) | (bl_lvl >> 8));
+
 #if defined(CONFIG_DISPLAY_SAMSUNG) || defined(CONFIG_DISPLAY_SAMSUNG_LEGO)
 	rc = ss_brightness_dcs(panel->panel_private, bl_lvl, BACKLIGHT_NORMAL);
 	if (rc < 0)
@@ -3442,6 +3445,8 @@ static int dsi_panel_parse_bl_config(struct dsi_panel *panel)
 		panel->bl_config.bl_level = val;
 	}
 #endif
+	panel->bl_config.bl_inverted_dbv = utils->read_bool(utils->data,
+		"qcom,mdss-dsi-bl-inverted-dbv");
 
 	if (panel->bl_config.type == DSI_BACKLIGHT_PWM) {
 		rc = dsi_panel_parse_bl_pwm_config(panel);

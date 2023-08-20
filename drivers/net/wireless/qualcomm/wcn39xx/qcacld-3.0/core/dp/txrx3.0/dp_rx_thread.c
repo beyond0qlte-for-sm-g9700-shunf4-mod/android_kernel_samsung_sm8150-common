@@ -133,6 +133,83 @@ QDF_STATUS dp_rx_tm_dump_stats(struct dp_rx_tm_handle *rx_tm_hdl)
 	return QDF_STATUS_SUCCESS;
 }
 
+#ifdef FEATURE_ALLOW_PKT_DROPPING
+/*
+ * dp_check_and_update_pending() - Check and Set RX Pending flag
+ * @tm_handle_cmn - DP thread pointer
+ *
+ * Returns: QDF_STATUS_SUCCESS on success or qdf error code on
+ * failure
+ */
+static inline
+QDF_STATUS dp_check_and_update_pending(struct dp_rx_tm_handle_cmn
+				       *tm_handle_cmn)
+{
+	struct dp_txrx_handle_cmn *txrx_handle_cmn;
+	struct dp_rx_tm_handle *rx_tm_hdl =
+		    (struct dp_rx_tm_handle *)tm_handle_cmn;
+	struct dp_soc *dp_soc;
+	uint32_t rx_pending_hl_threshold;
+	uint32_t rx_pending_lo_threshold;
+	uint32_t nbuf_queued_total = 0;
+	uint32_t nbuf_dequeued_total = 0;
+	uint32_t rx_flushed_total = 0;
+	uint32_t pending = 0;
+	int i;
+
+	txrx_handle_cmn =
+		dp_rx_thread_get_txrx_handle(tm_handle_cmn);
+	if (!txrx_handle_cmn) {
+		dp_err("invalid txrx_handle_cmn!");
+		QDF_BUG(0);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	dp_soc = (struct dp_soc *)dp_txrx_get_soc_from_ext_handle(
+					txrx_handle_cmn);
+	if (!dp_soc) {
+		dp_err("invalid soc!");
+		QDF_BUG(0);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	rx_pending_hl_threshold = wlan_cfg_rx_pending_hl_threshold(
+				  dp_soc->wlan_cfg_ctx);
+	rx_pending_lo_threshold = wlan_cfg_rx_pending_lo_threshold(
+				  dp_soc->wlan_cfg_ctx);
+
+	for (i = 0; i < rx_tm_hdl->num_dp_rx_threads; i++) {
+		if (likely(rx_tm_hdl->rx_thread[i])) {
+			nbuf_queued_total +=
+			    rx_tm_hdl->rx_thread[i]->stats.nbuf_queued_total;
+			nbuf_dequeued_total +=
+			    rx_tm_hdl->rx_thread[i]->stats.nbuf_dequeued;
+			rx_flushed_total +=
+			    rx_tm_hdl->rx_thread[i]->stats.rx_flushed;
+		}
+	}
+
+	if (nbuf_queued_total > (nbuf_dequeued_total + rx_flushed_total))
+		pending = nbuf_queued_total - (nbuf_dequeued_total +
+					       rx_flushed_total);
+
+	if (unlikely(pending > rx_pending_hl_threshold))
+		qdf_atomic_set(&rx_tm_hdl->allow_dropping, 1);
+	else if (pending < rx_pending_lo_threshold)
+		qdf_atomic_set(&rx_tm_hdl->allow_dropping, 0);
+
+	return QDF_STATUS_SUCCESS;
+}
+
+#else
+static inline
+QDF_STATUS dp_check_and_update_pending(struct dp_rx_tm_handle_cmn
+				       *tm_handle_cmn)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif
+
 /**
  * dp_rx_tm_thread_enqueue() - enqueue nbuf list into rx_thread
  * @rx_thread - rx_thread in which the nbuf needs to be queued

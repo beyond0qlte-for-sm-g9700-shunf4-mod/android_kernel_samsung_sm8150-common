@@ -83,6 +83,8 @@
  * 500ms, this should be less than tag timeout
  */
 #define IPA_MHIP_HOLB_TMO 2000000
+#define IPA_MPM_FLOW_CTRL_ADD 1
+#define IPA_MPM_FLOW_CTRL_DELETE 0
 #define IPA_MPM_NUM_OF_INIT_CMD_DESC 2
 
 enum mhip_re_type {

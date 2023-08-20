@@ -2103,6 +2103,9 @@ typedef enum {
  * @bg_scan_bad_rssi_thresh:    Bad RSSI threshold to perform bg scan.
  * @bad_rssi_thresh_offset_2g:  Offset from Bad RSSI threshold for 2G to 5G Roam
  * @bg_scan_client_bitmap:      Bitmap to identify the client scans to snoop.
+ * @roam_data_rssi_threshold_triggers:    Bad data RSSI threshold to roam
+ * @roam_data_rssi_threshold:    Bad data RSSI threshold to roam
+ * @rx_data_inactivity_time:    rx duration to check data RSSI
  *
  * This structure holds all the key parameters related to
  * initial connection and also roaming connections.
@@ -2136,6 +2139,9 @@ struct roam_ext_params {
 	int8_t bg_scan_bad_rssi_thresh;
 	uint8_t roam_bad_rssi_thresh_offset_2g;
 	uint32_t bg_scan_client_bitmap;
+	uint32_t roam_data_rssi_threshold_triggers;
+	int32_t roam_data_rssi_threshold;
+	uint32_t rx_data_inactivity_time;
 };
 
 /**
@@ -2295,7 +2301,7 @@ struct roam_offload_scan_req {
 	uint32_t roam_inactive_data_packet_count;
 	uint32_t roam_scan_period_after_inactivity;
 	uint32_t btm_query_bitmask;
-	struct roam_trigger_min_rssi min_rssi_params[NUM_OF_ROAM_TRIGGERS];
+	struct roam_trigger_min_rssi min_rssi_params[NUM_OF_ROAM_MIN_RSSI];
 	struct roam_trigger_score_delta score_delta_param[NUM_OF_ROAM_TRIGGERS];
 	uint32_t full_roam_scan_period;
 };
@@ -3006,6 +3012,7 @@ struct roam_offload_synch_ind {
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
 struct handoff_failure_ind {
 	uint8_t vdev_id;
+	struct qdf_mac_addr bssid;
 };
 
 struct roam_offload_synch_fail {
@@ -3554,6 +3561,7 @@ struct wifi_interface_info {
 	uint8_t apCountryStr[CFG_COUNTRY_CODE_LEN];
 	/* country string for this association */
 	uint8_t countryStr[CFG_COUNTRY_CODE_LEN];
+	uint8_t time_slice_duty_cycle;
 };
 
 /**
@@ -5384,6 +5392,7 @@ struct ppet_hdr {
 #define HE_CH_WIDTH_COMBINE(b0, b1, b2, b3, b4, b5, b6)             \
 	((uint8_t)(b0) | ((b1) << 1) | ((b2) << 2) |  ((b3) << 3) | \
 	((b4) << 4) | ((b5) << 5) | ((b6) << 6))
+#define HE_CH_WIDTH_CLR_BIT(ch_wd, bit)      (((ch_wd) >> (bit)) & ~1)
 
 /*
  * MCS values are interpreted as in IEEE 11ax-D1.4 spec onwards
