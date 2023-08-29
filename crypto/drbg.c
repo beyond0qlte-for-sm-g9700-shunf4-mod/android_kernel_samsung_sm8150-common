@@ -1294,7 +1294,7 @@ static int drbg_seed(struct drbg_state *drbg, struct drbg_string *pers,
 		ret = drbg_get_random_bytes(drbg, entropy, entropylen);
 		if (ret)
 			goto out;
-
+#endif
 		if (!drbg->jent) {
 			drbg_string_fill(&data1, entropy, entropylen);
 			pr_devel("DRBG: (re)seeding with %u bytes of entropy\n",
