@@ -520,6 +520,7 @@ static void kauditd_printk_skb(struct sk_buff *skb)
 		sec_avc_log("%s\n", data);
 #else
 	if (nlh->nlmsg_type != AUDIT_EOE) {
+		// shunf4: cancel ratelimit here to view full avc log. (or enable PROC_AVC)
 		if (printk_ratelimit())
 			pr_notice("type=%d %s\n", nlh->nlmsg_type, data);
 		else

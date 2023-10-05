@@ -494,6 +494,7 @@ static inline int avc_xperms_audit(struct selinux_state *state,
 
 	audited = avc_xperms_audit_required(
 			requested, avd, xpd, perm, result, &denied);
+	// shunf4: comment here to force audit "dontaudit" events.
 	if (likely(!audited))
 		return 0;
 	return slow_avc_audit(state, ssid, tsid, tclass, requested,
